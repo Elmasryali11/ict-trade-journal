@@ -132,7 +132,7 @@ export default function TradingJournal() {
     setLoading(true);
     setAiAnalysis("");
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -177,10 +177,14 @@ Be direct. No generic advice. Reference ICT concepts specifically where relevant
         })
       });
       const data = await response.json();
-      const text = data.content.map(b => b.text || "").join("\n");
-      setAiAnalysis(text);
+      if (data.error) {
+        setAiAnalysis(`Error: ${data.error.message}`);
+      } else {
+        const text = data.content.map(b => b.text || "").join("\n");
+        setAiAnalysis(text);
+      }
     } catch (e) {
-      setAiAnalysis("Analysis failed. Check your connection and try again.");
+      setAiAnalysis(`Analysis failed: ${e.message}`);
     }
     setLoading(false);
   };
@@ -194,7 +198,7 @@ Be direct. No generic advice. Reference ICT concepts specifically where relevant
         `${t.date} | ${t.pair} | ${t.direction} | ${t.setup} | ${t.session} | PnL: ${t.pnl} | Emotion: ${t.emotions}`
       ).join("\n");
 
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -229,9 +233,13 @@ Be direct. Reference ICT concepts. Call out bad habits without sugarcoating.`
         })
       });
       const data = await response.json();
-      setWeeklyInsight(data.content.map(b => b.text || "").join("\n"));
-    } catch {
-      setWeeklyInsight("Analysis failed. Try again.");
+      if (data.error) {
+        setWeeklyInsight(`Error: ${data.error.message}`);
+      } else {
+        setWeeklyInsight(data.content.map(b => b.text || "").join("\n"));
+      }
+    } catch (e) {
+      setWeeklyInsight(`Analysis failed: ${e.message}`);
     }
     setWeeklyLoading(false);
   };
@@ -281,7 +289,6 @@ Be direct. Reference ICT concepts. Call out bad habits without sugarcoating.`
     }}>
       <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
 
-      {/* Header */}
       <div style={{
         borderBottom: "1px solid rgba(255,255,255,0.07)",
         padding: "0 32px",
@@ -325,7 +332,6 @@ Be direct. Reference ICT concepts. Call out bad habits without sugarcoating.`
         </div>
       </div>
 
-      {/* Stats Bar */}
       <div style={{
         display: "flex", gap: 12, padding: "16px 32px",
         borderBottom: "1px solid rgba(255,255,255,0.05)",
@@ -340,7 +346,6 @@ Be direct. Reference ICT concepts. Call out bad habits without sugarcoating.`
 
       <div style={{ padding: "32px", maxWidth: 1100, margin: "0 auto" }}>
 
-        {/* NEW TRADE TAB */}
         {tab === "journal" && (
           <div>
             <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 22, marginBottom: 6 }}>Log a Trade</div>
@@ -419,7 +424,6 @@ Be direct. Reference ICT concepts. Call out bad habits without sugarcoating.`
           </div>
         )}
 
-        {/* TRADE LOG TAB */}
         {tab === "log" && (
           <div>
             <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 22, marginBottom: 6 }}>Trade Log</div>
@@ -456,7 +460,6 @@ Be direct. Reference ICT concepts. Call out bad habits without sugarcoating.`
           </div>
         )}
 
-        {/* AI ANALYSIS TAB */}
         {tab === "analyze" && (
           <div>
             <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 22, marginBottom: 6 }}>AI Trade Analysis</div>
@@ -530,7 +533,6 @@ Be direct. Reference ICT concepts. Call out bad habits without sugarcoating.`
           </div>
         )}
 
-        {/* INSIGHTS TAB */}
         {tab === "insights" && (
           <div>
             <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 22, marginBottom: 6 }}>Performance Insights</div>
@@ -575,7 +577,6 @@ Be direct. Reference ICT concepts. Call out bad habits without sugarcoating.`
               </div>
             )}
 
-            {/* Setup breakdown */}
             {trades.length > 0 && (
               <div style={{ marginTop: 24 }}>
                 <div style={{ fontSize: 10, color: "#444", letterSpacing: 2, textTransform: "uppercase", marginBottom: 16 }}>Breakdown by Setup</div>
@@ -608,3 +609,11 @@ Be direct. Reference ICT concepts. Call out bad habits without sugarcoating.`
     </div>
   );
 }
+
+    
+         
+         
+         
+         
+   
+           
