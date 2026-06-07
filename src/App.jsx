@@ -2,14 +2,10 @@ import { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 // ============================================================
-//  SUPABASE CONFIG — paste your two values here.
-//  Find them in Supabase -> Project Settings -> API
-//  (Project URL + the "anon / public" key).
-//  The anon key is SAFE to expose in client code — your data
-//  is protected by Row Level Security, not by hiding this key.
+//  SUPABASE CONFIG
 // ============================================================
-const SUPABASE_URL = https://nsnftzlfbxvwvhjyjwhq.supabase.co;
-const SUPABASE_ANON_KEY = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5zbmZ0emxmYnh2d3Zoanlqd2hxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NjEyNDAsImV4cCI6MjA5NjQzNzI0MH0.UIzjs5EkMIpXiJ99PS8Cyj9WH2Vz-Dvouxzg1C512aU
+const SUPABASE_URL = "https://nsnftzlfbxvwvhjyjwhq.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5zbmZ0emxmYnh2d3Zoanlqd2hxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NjEyNDAsImV4cCI6MjA5NjQzNzI0MH0.UIzjs5EkMIpXiJ99PS8Cyj9WH2Vz-Dvouxzg1C512aU";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -160,7 +156,6 @@ export default function TradingJournal() {
         });
         if (error) setAuthError(error.message);
         else if (!data.session) setAuthMessage("Account created. Check your email to confirm, then sign in.");
-        // If data.session exists, onAuthStateChange logs them in automatically.
       } else {
         const { error } = await supabase.auth.signInWithPassword({
           email: authEmail.trim(),
@@ -844,7 +839,6 @@ Be direct. Reference ICT concepts. Call out bad habits without sugarcoating.`
     </div>
   );
 }
-
     
          
          
