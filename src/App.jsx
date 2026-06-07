@@ -1,6 +1,17 @@
 import { useState, useEffect } from "react";
+import { createClient } from "@supabase/supabase-js";
 
-const STORAGE_KEY = "trading-journal-trades";
+// ============================================================
+//  SUPABASE CONFIG — paste your two values here.
+//  Find them in Supabase -> Project Settings -> API
+//  (Project URL + the "anon / public" key).
+//  The anon key is SAFE to expose in client code — your data
+//  is protected by Row Level Security, not by hiding this key.
+// ============================================================
+const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR-ANON-PUBLIC-KEY";
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const initialForm = {
   date: new Date().toISOString().split("T")[0],
@@ -65,13 +76,13 @@ function TradeRow({ trade, onSelect }) {
         fontSize: 11,
         fontWeight: 700,
         letterSpacing: 1,
-      }}>{trade.direction.toUpperCase()}</span>
+      }}>{(trade.direction || "").toUpperCase()}</span>
       <span style={{ color: "#888" }}>{trade.setup}</span>
       <span style={{ color: "#888" }}>{trade.session}</span>
       <span style={{
         color: isWin ? "#00d4a0" : "#ff4d6d",
         fontWeight: 700,
-      }}>{isWin ? "+" : ""}{pnl.toFixed(2)}</span>
+      }}>{isWin ? "+" : ""}{isNaN(pnl) ? "—" : pnl.toFixed(2)}</span>
       <span style={{
         fontSize: 11,
         color: "#555",
@@ -92,29 +103,91 @@ export default function TradingJournal() {
   const [aiAnalysis, setAiAnalysis] = useState("");
   const [weeklyInsight, setWeeklyInsight] = useState("");
   const [weeklyLoading, setWeeklyLoading] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
+  // ---- AUTH STATE ----
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authMode, setAuthMode] = useState("signin"); // "signin" | "signup"
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+
+  const configured = !SUPABASE_URL.includes("YOUR-PROJECT") && !SUPABASE_ANON_KEY.includes("YOUR-ANON");
+
+  // Check existing session on mount + subscribe to auth changes
   useEffect(() => {
-    const loadTrades = async () => {
-      try {
-        const result = await window.storage.get(STORAGE_KEY);
-        if (result) setTrades(JSON.parse(result.value));
-      } catch {}
-    };
-    loadTrades();
-  }, []);
+    if (!configured) { setAuthLoading(false); return; }
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, [configured]);
 
-  const saveTrades = async (updated) => {
+  // Load this user's trades whenever they sign in (cleared on sign out)
+  useEffect(() => {
+    if (!user) { setTrades([]); return; }
+    let active = true;
+    (async () => {
+      const { data, error } = await supabase
+        .from("trades")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (active && !error && data) setTrades(data);
+    })();
+    return () => { active = false; };
+  }, [user?.id]);
+
+  const handleAuth = async () => {
+    setAuthError("");
+    setAuthMessage("");
+    if (!authEmail || !authPassword) {
+      setAuthError("Enter your email and password.");
+      return;
+    }
+    setAuthSubmitting(true);
     try {
-      await window.storage.set(STORAGE_KEY, JSON.stringify(updated));
-    } catch {}
-    setTrades(updated);
+      if (authMode === "signup") {
+        const { data, error } = await supabase.auth.signUp({
+          email: authEmail.trim(),
+          password: authPassword,
+        });
+        if (error) setAuthError(error.message);
+        else if (!data.session) setAuthMessage("Account created. Check your email to confirm, then sign in.");
+        // If data.session exists, onAuthStateChange logs them in automatically.
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: authEmail.trim(),
+          password: authPassword,
+        });
+        if (error) setAuthError(error.message);
+      }
+    } catch (e) {
+      setAuthError(e.message || "Something went wrong.");
+    }
+    setAuthSubmitting(false);
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setTrades([]);
+    setSelectedTrade(null);
+    setAiAnalysis("");
+    setWeeklyInsight("");
+    setTab("journal");
   };
 
   const stats = (() => {
     if (!trades.length) return { total: 0, wins: 0, losses: 0, winRate: 0, totalPnl: 0, avgWin: 0, avgLoss: 0 };
     const wins = trades.filter(t => parseFloat(t.pnl) > 0);
     const losses = trades.filter(t => parseFloat(t.pnl) < 0);
-    const totalPnl = trades.reduce((s, t) => s + parseFloat(t.pnl || 0), 0);
+    const totalPnl = trades.reduce((s, t) => s + (parseFloat(t.pnl) || 0), 0);
     const avgWin = wins.length ? wins.reduce((s, t) => s + parseFloat(t.pnl), 0) / wins.length : 0;
     const avgLoss = losses.length ? losses.reduce((s, t) => s + parseFloat(t.pnl), 0) / losses.length : 0;
     return {
@@ -202,7 +275,7 @@ Be direct. No generic advice. Reference ICT concepts specifically where relevant
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-6",
           max_tokens: 1000,
           messages: [{
             role: "user",
@@ -245,13 +318,35 @@ Be direct. Reference ICT concepts. Call out bad habits without sugarcoating.`
   };
 
   const handleSubmit = async () => {
+    setSaveError("");
     if (!form.pair || !form.entry || !form.exit || !form.pnl) return;
-    const newTrade = { ...form, id: Date.now() };
-    const updated = [newTrade, ...trades];
-    await saveTrades(updated);
-    setSelectedTrade(newTrade);
+    if (!user) { setSaveError("You must be signed in to save a trade."); return; }
+    const { data, error } = await supabase
+      .from("trades")
+      .insert([{
+        user_id: user.id,
+        date: form.date,
+        pair: form.pair,
+        direction: form.direction,
+        session: form.session,
+        setup: form.setup,
+        entry: form.entry,
+        exit: form.exit,
+        size: form.size,
+        pnl: form.pnl,
+        emotions: form.emotions,
+        notes: form.notes,
+      }])
+      .select()
+      .single();
+    if (error) {
+      setSaveError("Could not save trade: " + error.message);
+      return;
+    }
+    setTrades([data, ...trades]);
+    setSelectedTrade(data);
     setTab("analyze");
-    analyzeWithAI(newTrade);
+    analyzeWithAI(data);
     setForm(initialForm);
   };
 
@@ -280,6 +375,126 @@ Be direct. Reference ICT concepts. Call out bad habits without sugarcoating.`
 
   const tabs = ["journal", "log", "analyze", "insights"];
 
+  const fontLink = (
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  );
+
+  // ---- CONFIG GUARD: keys not pasted yet ----
+  if (!configured) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0a0a0a", color: "#e8e8e8", fontFamily: "'Space Mono', monospace", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        {fontLink}
+        <div style={{ maxWidth: 460, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,77,109,0.3)", borderRadius: 12, padding: 28 }}>
+          <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 18, marginBottom: 10, color: "#ff4d6d" }}>Supabase not configured</div>
+          <div style={{ fontSize: 13, lineHeight: 1.7, color: "#aaa" }}>
+            Open this file and replace <code style={{ color: "#00d4a0" }}>SUPABASE_URL</code> and <code style={{ color: "#00d4a0" }}>SUPABASE_ANON_KEY</code> at the top with the values from your Supabase project (Project Settings → API), then redeploy.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- AUTH LOADING ----
+  if (authLoading) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0a0a0a", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {fontLink}
+        <div style={{ width: 24, height: 24, border: "2px solid #222", borderTopColor: "#00d4a0", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  // ---- LOGIN / SIGNUP ----
+  if (!user) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0a0a0a", color: "#e8e8e8", fontFamily: "'Space Mono', monospace", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        {fontLink}
+        <div style={{ width: "100%", maxWidth: 380 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "center", marginBottom: 28 }}>
+            <div style={{
+              width: 36, height: 36,
+              background: "linear-gradient(135deg, #00d4a0, #00a0ff)",
+              borderRadius: 8,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 18,
+            }}>📈</div>
+            <div>
+              <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 18, letterSpacing: -0.5 }}>EDGE JOURNAL</div>
+              <div style={{ fontSize: 9, color: "#444", letterSpacing: 2 }}>ICT TRADING JOURNAL</div>
+            </div>
+          </div>
+
+          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: 28 }}>
+            <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 20, marginBottom: 4 }}>
+              {authMode === "signup" ? "Create your account" : "Welcome back"}
+            </div>
+            <div style={{ color: "#555", fontSize: 12, marginBottom: 24, letterSpacing: 0.5 }}>
+              {authMode === "signup" ? "Start logging trades that never get lost" : "Sign in to your trading journal"}
+            </div>
+
+            <label style={labelStyle}>Email</label>
+            <input
+              type="email"
+              value={authEmail}
+              onChange={e => setAuthEmail(e.target.value)}
+              placeholder="you@email.com"
+              style={{ ...inputStyle, marginBottom: 14 }}
+              onKeyDown={e => { if (e.key === "Enter") handleAuth(); }}
+            />
+
+            <label style={labelStyle}>Password</label>
+            <input
+              type="password"
+              value={authPassword}
+              onChange={e => setAuthPassword(e.target.value)}
+              placeholder="••••••••"
+              style={inputStyle}
+              onKeyDown={e => { if (e.key === "Enter") handleAuth(); }}
+            />
+
+            {authError && <div style={{ color: "#ff4d6d", fontSize: 12, marginTop: 14 }}>{authError}</div>}
+            {authMessage && <div style={{ color: "#00d4a0", fontSize: 12, marginTop: 14 }}>{authMessage}</div>}
+
+            <button
+              onClick={handleAuth}
+              disabled={authSubmitting}
+              style={{
+                marginTop: 20,
+                width: "100%",
+                background: "linear-gradient(135deg, #00d4a0, #00a0ff)",
+                border: "none",
+                borderRadius: 8,
+                padding: "13px",
+                color: "#0a0a0a",
+                fontFamily: "'Space Mono', monospace",
+                fontWeight: 700,
+                fontSize: 13,
+                letterSpacing: 1.5,
+                cursor: authSubmitting ? "default" : "pointer",
+                textTransform: "uppercase",
+                opacity: authSubmitting ? 0.7 : 1,
+              }}
+            >
+              {authSubmitting ? "Please wait..." : authMode === "signup" ? "Create account →" : "Sign in →"}
+            </button>
+
+            <div style={{ marginTop: 18, textAlign: "center", fontSize: 12, color: "#555" }}>
+              {authMode === "signup" ? "Already have an account?" : "Don't have an account?"}{" "}
+              <span
+                onClick={() => { setAuthMode(authMode === "signup" ? "signin" : "signup"); setAuthError(""); setAuthMessage(""); }}
+                style={{ color: "#00d4a0", cursor: "pointer", fontWeight: 700 }}
+              >
+                {authMode === "signup" ? "Sign in" : "Sign up"}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- MAIN APP ----
   return (
     <div style={{
       minHeight: "100vh",
@@ -287,7 +502,7 @@ Be direct. Reference ICT concepts. Call out bad habits without sugarcoating.`
       color: "#e8e8e8",
       fontFamily: "'Space Mono', monospace",
     }}>
-      <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+      {fontLink}
 
       <div style={{
         borderBottom: "1px solid rgba(255,255,255,0.07)",
@@ -311,24 +526,42 @@ Be direct. Reference ICT concepts. Call out bad habits without sugarcoating.`
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 4 }}>
-          {tabs.map(t => (
-            <button key={t} onClick={() => setTab(t)} style={{
-              background: tab === t ? "rgba(0,212,160,0.1)" : "transparent",
-              border: tab === t ? "1px solid rgba(0,212,160,0.3)" : "1px solid transparent",
-              color: tab === t ? "#00d4a0" : "#555",
-              padding: "6px 16px",
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div style={{ display: "flex", gap: 4 }}>
+            {tabs.map(t => (
+              <button key={t} onClick={() => setTab(t)} style={{
+                background: tab === t ? "rgba(0,212,160,0.1)" : "transparent",
+                border: tab === t ? "1px solid rgba(0,212,160,0.3)" : "1px solid transparent",
+                color: tab === t ? "#00d4a0" : "#555",
+                padding: "6px 16px",
+                borderRadius: 6,
+                cursor: "pointer",
+                fontSize: 11,
+                letterSpacing: 1.5,
+                textTransform: "uppercase",
+                fontFamily: "'Space Mono', monospace",
+                transition: "all 0.15s",
+              }}>
+                {t === "journal" ? "New Trade" : t === "log" ? "Trade Log" : t === "analyze" ? "AI Analysis" : "Insights"}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 12, paddingLeft: 16, borderLeft: "1px solid rgba(255,255,255,0.07)" }}>
+            <span style={{ fontSize: 11, color: "#555", maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</span>
+            <button onClick={handleLogout} style={{
+              background: "transparent",
+              border: "1px solid rgba(255,255,255,0.1)",
+              color: "#888",
+              padding: "6px 14px",
               borderRadius: 6,
               cursor: "pointer",
               fontSize: 11,
-              letterSpacing: 1.5,
+              letterSpacing: 1,
               textTransform: "uppercase",
               fontFamily: "'Space Mono', monospace",
-              transition: "all 0.15s",
-            }}>
-              {t === "journal" ? "New Trade" : t === "log" ? "Trade Log" : t === "analyze" ? "AI Analysis" : "Insights"}
-            </button>
-          ))}
+            }}>Logout</button>
+          </div>
         </div>
       </div>
 
@@ -421,6 +654,8 @@ Be direct. Reference ICT concepts. Call out bad habits without sugarcoating.`
             >
               Log Trade + Get AI Feedback →
             </button>
+
+            {saveError && <div style={{ color: "#ff4d6d", fontSize: 12, marginTop: 14 }}>{saveError}</div>}
           </div>
         )}
 
