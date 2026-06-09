@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -839,6 +841,7 @@ Be direct. Reference ICT concepts. Call out bad habits without sugarcoating.`
     </div>
   );
 }
+
     
          
          
